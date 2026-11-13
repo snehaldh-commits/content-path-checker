@@ -5,11 +5,23 @@
 //   courses/<lang>/<id>          JSON: course record (paths, file info, previous versions)
 //   files/<lang>/<id>/<stamp>    binary: original uploaded report file
 //   state                        JSON: { lastChange, lastBackup }
+//   languages                    JSON: [{ code, name }]  (English and Hindi by default)
 import { getStore } from "@netlify/blobs";
 
 export const config = { path: "/api/*" };
 
-const LANGS = ["en", "hi"];
+const DEFAULT_LANGS = [{ code: "en", name: "English" }, { code: "hi", name: "Hindi" }];
+async function getLangs(s) {
+  const l = await s.get("languages", { type: "json" });
+  return Array.isArray(l) && l.length ? l : DEFAULT_LANGS;
+}
+function makeCode(name, used) {
+  let base = String(name).toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "").slice(0, 12);
+  if (!base) base = "lang";
+  let code = base, n = 2;
+  while (used.has(code)) code = base + n++;
+  return code;
+}
 const store = () => getStore({ name: "content-path-checker", consistency: "strong" });
 
 const json = (data, status = 200) =>
@@ -94,6 +106,9 @@ export default async (req) => {
   const route = url.pathname.replace(/^\/api\/?/, "").replace(/\/$/, "");
   const lang = url.searchParams.get("lang");
   const s = store();
+  let langs = DEFAULT_LANGS;
+  try { langs = await getLangs(s); } catch (e) { /* storage not reachable: fall back to defaults */ }
+  const LANGS = langs.map(l => l.code);
   const isWrite = req.method !== "GET";
 
   if (isWrite) {
@@ -103,6 +118,32 @@ export default async (req) => {
 
   try {
     if (route === "health") return json({ ok: true, passcode: !!passcode() });
+
+    if (route === "languages") {
+      if (req.method === "GET") return json(langs);
+      if (req.method === "POST") {
+        const body = await req.json();
+        const name = String(body.name || "").trim().slice(0, 40);
+        if (!name) return err("Language name is required.");
+        const found = langs.find(l => l.name.toLowerCase() === name.toLowerCase());
+        if (found) return json({ language: found, languages: langs, existed: true });
+        const code = body.code && /^[a-z0-9]{1,12}$/.test(body.code) && !LANGS.includes(body.code)
+          ? body.code : makeCode(name, new Set(LANGS));
+        const next = [...langs, { code, name }];
+        await s.setJSON("languages", next);
+        return json({ language: { code, name }, languages: next });
+      }
+      if (req.method === "DELETE") {
+        const code = url.searchParams.get("code");
+        if (!LANGS.includes(code)) return err("Unknown language");
+        if (langs.length <= 1) return err("At least one language must remain.");
+        const { blobs } = await s.list({ prefix: `courses/${code}/` });
+        if (blobs.length) return err("Delete this language's courses first.");
+        const next = langs.filter(l => l.code !== code);
+        await s.setJSON("languages", next);
+        return json({ languages: next });
+      }
+    }
 
     if (route === "state" && req.method === "GET") return json((await s.get("state", { type: "json" })) || {});
     if (route === "backup-done" && req.method === "POST") {
