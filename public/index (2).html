@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content Path Overlap Checker</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+  if (typeof XLSX === 'undefined') {
+    document.write('<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"><\/script>');
+  }
+</script>
+<style>
+  :root{
+    --bg:#f4f6fa; --card:#fff; --ink:#1d2433; --muted:#667085; --line:#e3e7ef;
+    --brand:#2f5bea; --brand-soft:#e8eefe; --ok:#12805c; --ok-soft:#e6f6ef;
+    --warn:#b54708; --warn-soft:#fff4e5; --bad:#c0362c; --bad-soft:#fdecea;
+    --en:#2f5bea; --hi:#d9480f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+  header{background:#1d2b64;color:#fff;padding:16px 28px}
+  .hwrap{max-width:1200px;margin:0 auto;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  header h1{margin:0;font-size:20px;font-weight:600}
+  header p{margin:4px 0 0;opacity:.8;font-size:13px}
+  .mode{font-size:12px;padding:5px 10px;border-radius:14px;background:rgba(255,255,255,.14);white-space:nowrap}
+  .mode.shared{background:#1f9d6b} .mode.local{background:#b54708}
+  .catbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  .catwrap{max-width:1200px;margin:0 auto;padding:10px 22px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{background:#fff;color:var(--muted);border-radius:0;padding:9px 22px;font-size:15px}
+  .seg{flex-wrap:wrap}
+  .seg button.active{color:#fff}
+  main{max-width:1200px;margin:0 auto;padding:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:18px}
+  .card h2{font-size:16px;margin:0 0 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .step{display:inline-flex;width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;font-size:12px;align-items:center;justify-content:center}
+  .lang-badge{font-size:12px;padding:2px 9px;border-radius:10px;color:#fff;font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.03em}
+  input[type=text],input[type=password],select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;background:#fff}
+  .drop{border:2px dashed #b9c4dc;border-radius:10px;padding:24px;text-align:center;cursor:pointer;background:#fafbfe;transition:.15s}
+  .drop:hover,.drop.over{border-color:var(--brand);background:var(--brand-soft)}
+  .drop b{color:var(--brand)}
+  button{border:0;border-radius:7px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer;background:var(--brand);color:#fff}
+  button.secondary{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  button.danger{background:#fff;color:var(--bad);border:1px solid #f1c3be}
+  button.small{padding:5px 10px;font-size:12px}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .muted{color:var(--muted)}
+  .chk{display:flex;align-items:center;gap:7px;font-size:13px;margin-top:10px}
+  .chk input{width:16px;height:16px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+  .stat{border-radius:9px;padding:12px 14px;border:1px solid var(--line)}
+  .stat .n{font-size:24px;font-weight:700}
+  .stat .t{font-size:12px;color:var(--muted)}
+  .stat.ok{background:var(--ok-soft)} .stat.warn{background:var(--warn-soft)} .stat.bad{background:var(--bad-soft)} .stat.info{background:var(--brand-soft)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border-bottom:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f7f8fb;font-weight:600;position:sticky;top:0;z-index:1}
+  td.path{font-family:Consolas,monospace;word-break:break-all;font-size:12px}
+  .tablewrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .chip{display:inline-block;background:var(--warn-soft);color:var(--warn);border:1px solid #fbd9a8;border-radius:12px;padding:2px 9px;font-size:12px;margin:2px 4px 2px 0;white-space:nowrap}
+  .chip.blue{background:var(--brand-soft);color:var(--brand);border-color:#c7d4fb}
+  .chip.x{background:#f3e8ff;color:#6b21a8;border-color:#e0c8fb}
+  .msg{padding:10px 14px;border-radius:8px;margin:10px 0;font-size:13px}
+  .msg.ok{background:var(--ok-soft);color:var(--ok)} .msg.bad{background:var(--bad-soft);color:var(--bad)} .msg.info{background:var(--brand-soft);color:var(--brand)}
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px;flex-wrap:wrap}
+  .tab{background:none;color:var(--muted);border-radius:7px 7px 0 0;padding:8px 14px;border:1px solid transparent;border-bottom:0}
+  .tab.active{color:var(--brand);border-color:var(--line);background:#fff;margin-bottom:-1px}
+  .hidden{display:none!important}
+  .search{max-width:320px}
+  .busy{position:fixed;inset:0;background:rgba(20,30,60,.25);display:flex;align-items:center;justify-content:center;z-index:50}
+  .busy div{background:#fff;padding:16px 24px;border-radius:10px;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.15)}
+  footer{text-align:center;color:var(--muted);font-size:12px;padding:10px 0 30px}
+</style>
+</head>
+<body>
+<header>
+  <div class="hwrap">
+    <div>
+      <h1>Content Path Overlap Checker</h1>
+      <p>Upload each course's content path report. Every new upload is checked against the courses already saved, so shared videos are flagged before they are uploaded again.</p>
+    </div>
+    <span id="modeBadge" class="mode">Connecting…</span>
+  </div>
+</header>
+
+<div class="catbar">
+  <div class="catwrap">
+    <b>Language:</b>
+    <div class="seg" id="langSeg"></div>
+    <button id="btnAddLang" class="secondary small">+ Add language</button>
+    <button id="btnRemoveLang" class="danger small hidden"></button>
+    <span class="muted" id="catHint"></span>
+    <span style="flex:1"></span>
+    <button id="btnRefresh" class="secondary small">↻ Refresh</button>
+  </div>
+</div>
+
+<main>
+  <div id="modeMsg" class="msg hidden"></div>
+
+  <!-- STEP 1 -->
+  <section class="card">
+    <h2><span class="step">1</span> Upload a content path report <span class="lang-badge" data-langbadge></span></h2>
+    <div id="drop" class="drop">
+      <div style="font-size:30px">📄</div>
+      <div><b>Click to choose</b> or drag &amp; drop an Excel / CSV file here</div>
+      <div class="muted" style="margin-top:4px;font-size:12px">.xlsx, .xls, .csv · it will be saved under the <b data-langname></b> category</div>
+      <input id="file" type="file" accept=".xlsx,.xls,.xlsm,.csv" hidden>
+    </div>
+
+    <div id="setup" class="hidden" style="margin-top:16px">
+      <div class="grid">
+        <div><label>Course name</label><input id="courseName" type="text"></div>
+        <div><label>Sheet</label><select id="sheetSel"></select></div>
+        <div><label>Content path column</label><select id="pathCol"></select></div>
+        <div><label>Title / video name column (optional)</label><select id="titleCol"></select></div>
+        <div><label>Uploaded by (your name)</label><input id="uploader" type="text" placeholder="optional"></div>
+      </div>
+      <div class="chk"><input type="checkbox" id="normalize" checked><span>Ignore differences in upper/lower case, extra spaces, and <code>/</code> vs <code>\</code> when matching</span></div>
+      <div class="chk" id="crossWrap"></div>
+      <div id="preview" class="muted" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:14px">
+        <button id="btnCheckSave">Check &amp; save to library</button>
+        <button id="btnCheckOnly" class="secondary">Check only (don't save)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2 RESULTS -->
+  <section id="results" class="card hidden">
+    <h2><span class="step">2</span> Match report: <span id="resTitle"></span> <span class="lang-badge" id="resLang"></span></h2>
+    <div id="resMsg"></div>
+    <div class="stats" id="stats"></div>
+    <div class="row" style="margin-bottom:12px;justify-content:space-between">
+      <div class="row">
+        <button id="btnDlXlsx">⬇ Download report (Excel)</button>
+        <button id="btnDlCsv" class="secondary">⬇ Download matches (CSV)</button>
+      </div>
+      <input id="resSearch" class="search" type="text" placeholder="Search path, title or course…">
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="matched">Matched paths</button>
+      <button class="tab" data-tab="bycourse">By course</button>
+      <button class="tab" data-tab="unique">New / unique paths</button>
+      <button class="tab" data-tab="dups">Repeated within this file</button>
+    </div>
+    <div class="tablewrap" id="resTable"></div>
+  </section>
+
+  <!-- STEP 3 LIBRARY -->
+  <section class="card">
+    <h2><span class="step">3</span> Saved courses <span class="lang-badge" data-langbadge></span> <span id="libCount" class="chip blue">0</span></h2>
+    <p class="muted" style="margin-top:-6px" id="libNote"></p>
+    <div id="backupStatus" class="msg info"></div>
+    <div class="row" style="margin-bottom:12px">
+      <button id="btnAllReport" class="secondary">Full overlap report (this category)</button>
+      <button id="btnExport" class="secondary">Export backup (all languages)</button>
+      <button id="btnImport" class="secondary">Import backup</button>
+      <input id="importFile" type="file" accept=".json" hidden>
+      <button id="btnClear" class="danger">Clear this category</button>
+    </div>
+    <div class="tablewrap" id="libTable"></div>
+  </section>
+</main>
+<footer id="foot"></footer>
+<div id="busy" class="busy hidden"><div id="busyTxt">Working…</div></div>
+
+<script>
+/* =====================================================================
+   Helpers
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Languages (categories) come from the server, so anyone can add one with "+ Add language"
+let LANGS = [{code:'en',name:'English'},{code:'hi',name:'Hindi'}];
+const LANG_NAME = {}, LANG_SHORT = {}, LANG_COLOR = {};
+const PALETTE = ['#2f5bea','#d9480f','#12805c','#7c3aed','#b8860b','#0e7490','#be185d','#4b5563','#9a3412','#1d4ed8'];
+function setLangs(list){
+  if(Array.isArray(list) && list.length) LANGS = list;
+  for(const k of Object.keys(LANG_NAME)){ delete LANG_NAME[k]; delete LANG_SHORT[k]; delete LANG_COLOR[k]; }
+  LANGS.forEach((l,i)=>{ LANG_NAME[l.code]=l.name; LANG_SHORT[l.code]=l.code.slice(0,3).toUpperCase(); LANG_COLOR[l.code]=PALETTE[i%PALETTE.length]; });
+  if(!LANG_NAME[LANG]) LANG = LANGS[0].code;
+}
+function lsGet(k,d=''){ try{ return localStorage.getItem(k) ?? d; }catch(e){ return d; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function norm(p, loose){
+  let s = String(p ?? '').trim();
+  if(!loose) return s;
+  return s.replace(/\\/g,'/').replace(/\s+/g,' ').replace(/\/{2,}/g,'/').replace(/\/+$/,'').toLowerCase();
+}
+const slug = s => String(s).trim().toLowerCase().slice(0,200);
+function busy(on, txt){ $('busy').classList.toggle('hidden', !on); if(txt) $('busyTxt').textContent = txt; }
+function bufToB64(buf){
+  if(!buf) return null;
+  const u=new Uint8Array(buf); let s=''; const CH=0x8000;
+  for(let i=0;i<u.length;i+=CH) s+=String.fromCharCode.apply(null,u.subarray(i,i+CH));
+  return btoa(s);
+}
+function b64ToBuf(b64){
+  if(!b64) return null;
+  const s=atob(b64), u=new Uint8Array(s.length);
+  for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i);
+  return u.buffer;
+}
+function stamp(){ return new Date().toISOString().slice(0,10); }
+function safe(s){ return String(s).replace(/[\\/:*?"<>|]+/g,'_').slice(0,60); }
+function download(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},800); }
+
+let LANG = lsGet('cpcLang','en') || 'en';
+setLangs(LANGS);
+
+/* =====================================================================
+   Storage: shared (Netlify server) or local (this browser only)
+   ===================================================================== */
+const MAX_ORIGINAL_BYTES = 3.5 * 1024 * 1024; // keep server requests under Netlify's 6 MB limit
+
+const Shared = {
+  async api(path, opts={}, retry=true){
+    const headers = Object.assign({}, opts.headers||{}, {'x-passcode': lsGet('cpcPasscode')});
+    if(opts.body && typeof opts.body==='string') headers['content-type']='application/json';
+    const r = await fetch('/api/'+path, Object.assign({}, opts, {headers}));
+    if(r.status===401 && retry){
+      busy(false);
+      const pc = prompt('This site is protected. Enter the team passcode to make changes:');
+      if(pc===null) throw new Error('Passcode needed to make changes.');
+      lsSet('cpcPasscode', pc.trim());
+      return this.api(path, opts, false);
+    }
+    if(!r.ok){ let m='Server error '+r.status; try{ m=(await r.json()).error||m; }catch(e){} throw new Error(m); }
+    return r;
+  },
+  async list(lang){ return (await this.api('courses?lang='+lang)).json(); },
+  async save(lang, rec, buf){
+    const body = Object.assign({}, rec, {fileB64: buf && buf.byteLength<=MAX_ORIGINAL_BYTES ? bufToB64(buf) : null});
+    return (await this.api('courses?lang='+lang, {method:'POST', body:JSON.stringify(body)})).json();
+  },
+  async importCourse(lang, rec){
+    return (await this.api('courses?lang='+lang+'&import=1', {method:'POST', body:JSON.stringify(rec)})).json();
+  },
+  async remove(lang, id){ await this.api('courses?lang='+lang+'&id='+encodeURIComponent(id), {method:'DELETE'}); },
+  async clear(lang){ await this.api('courses?lang='+lang, {method:'DELETE'}); },
+  hasFile(f){ return !!f.fileKey; },
+  async fileBuf(f){
+    const r = await this.api('file?key='+encodeURIComponent(f.fileKey)+'&name='+encodeURIComponent(f.file));
+    return r.arrayBuffer();
+  },
+  async state(){ return (await this.api('state')).json(); },
+  async markBackup(){ await this.api('backup-done', {method:'POST', body:'{}'}); },
+  async languages(){ return (await this.api('languages')).json(); },
+  async addLanguage(name, code){ return (await this.api('languages', {method:'POST', body:JSON.stringify({name, code})})).json(); },
+  async removeLanguage(code){ return (await this.api('languages?code='+encodeURIComponent(code), {method:'DELETE'})).json(); }
+};
+
+const Local = {
+  db:null,
+  open(){
+    return new Promise(res=>{
+      try{
+        const r = indexedDB.open('contentPathChecker2', 1);
+        r.onupgradeneeded = e => e.target.result.createObjectStore('courses', {keyPath:'key'});
+        r.onsuccess = async e => { this.db = e.target.result; await this.migrateV1(); res(true); };
+        r.onerror = () => res(false);
+      }catch(e){ res(false); }
+    });
+  },
+  // bring over courses saved by the earlier single-file version (they become English)
+  migrateV1(){
+    return new Promise(res=>{
+      if(lsGet('cpcMigrated')==='1') return res();
+      try{
+        const r = indexedDB.open('contentPathChecker');
+        r.onupgradeneeded = e => { e.target.transaction.abort(); };
+        r.onsuccess = e => {
+          const old = e.target.result;
+          if(!old.objectStoreNames.contains('courses')){ old.close(); lsSet('cpcMigrated','1'); return res(); }
+          const q = old.transaction('courses').objectStore('courses').getAll();
+          q.onsuccess = async () => {
+            for(const c of q.result){ await this.put(Object.assign({}, c, {lang:'en', key:'en/'+c.id})); }
+            old.close(); lsSet('cpcMigrated','1'); res();
+          };
+          q.onerror = () => { old.close(); res(); };
+        };
+        r.onerror = () => res();
+      }catch(e){ res(); }
+    });
+  },
+  tx(mode, fn){ return new Promise((res,rej)=>{ const t=this.db.transaction('courses',mode); const out=fn(t.objectStore('courses')); t.oncomplete=()=>res(out&&out.result); t.onerror=rej; }); },
+  put(rec){ return this.tx('readwrite', s=>s.put(rec)); },
+  async all(){ return (await this.tx('readonly', s=>s.getAll())) || []; },
+  async list(lang){ return (await this.all()).filter(c=>(c.lang||'en')===lang); },
+  async save(lang, rec, buf){
+    const id = slug(rec.name), key = lang+'/'+id;
+    const existing = (await this.all()).find(c=>c.key===key);
+    const history = existing ? [...(existing.history||[]), {file:existing.file, fileType:existing.fileType||'', uploadedAt:existing.uploadedAt, uploadedBy:existing.uploadedBy||'', pathCount:existing.entries.length, fileData:existing.fileData||null}] : [];
+    await this.put(Object.assign({}, rec, {key, id, lang, uploadedAt:new Date().toISOString(), fileData:buf||null, history}));
+    lsSet('cpcLocalChanged', new Date().toISOString());
+    return {existed:!!existing};
+  },
+  async importCourse(lang, rec){
+    const id = slug(rec.name);
+    await this.put({key:lang+'/'+id, id, lang, name:rec.name, file:rec.file, fileType:rec.fileType||'', uploadedAt:rec.uploadedAt||new Date().toISOString(),
+      uploadedBy:rec.uploadedBy||'', pathColumn:rec.pathColumn||'', titleColumn:rec.titleColumn||'', entries:rec.entries,
+      fileData:b64ToBuf(rec.fileB64), history:(rec.history||[]).map(h=>({file:h.file, fileType:h.fileType||'', uploadedAt:h.uploadedAt, uploadedBy:h.uploadedBy||'', pathCount:h.pathCount||0, fileData:b64ToBuf(h.fileB64)}))});
+    lsSet('cpcLocalChanged', new Date().toISOString());
+  },
+  async remove(lang, id){ await this.tx('readwrite', s=>s.delete(lang+'/'+id)); lsSet('cpcLocalChanged', new Date().toISOString()); },
+  async clear(lang){ for(const c of await this.list(lang)) await this.tx('readwrite', s=>s.delete(c.key)); lsSet('cpcLocalChanged', new Date().toISOString()); },
+  hasFile(f){ return !!f.fileData; },
+  async fileBuf(f){ return f.fileData; },
+  async state(){ return {lastChange: lsGet('cpcLocalChanged')||null, lastBackup: lsGet('cpcLocalBackup')||null}; },
+  async markBackup(){ lsSet('cpcLocalBackup', new Date().toISOString()); },
+  async languages(){ try{ const l=JSON.parse(lsGet('cpcLangs')||'null'); if(Array.isArray(l)&&l.length) return l; }catch(e){} return [{code:'en',name:'English'},{code:'hi',name:'Hindi'}]; },
+  async addLanguage(name, code){
+    const langs = await this.languages();
+    const found = langs.find(l=>l.name.toLowerCase()===name.toLowerCase());
+    if(found) return {language:found, languages:langs, existed:true};
+    const used = new Set(langs.map(l=>l.code));
+    let c = code && /^[a-z0-9]{1,12}$/.test(code) && !used.has(code) ? code : null;
+    if(!c){ let base = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'').slice(0,12) || 'lang'; c=base; let n=2; while(used.has(c)) c=base+n++; }
+    const next = [...langs, {code:c, name}]; lsSet('cpcLangs', JSON.stringify(next));
+    return {language:{code:c,name}, languages:next};
+  },
+  async removeLanguage(code){
+    const langs = await this.languages();
+    if(langs.length<=1) throw new Error('At least one language must remain.');
+    if((await this.list(code)).length) throw new Error("Delete this language's courses first.");
+    const next = langs.filter(l=>l.code!==code); lsSet('cpcLangs', JSON.stringify(next));
+    return {languages:next};
+  }
+};
+
+const Mem = Object.assign({}, Local, {   // used only if the browser blocks storage completely
+  rows:{},
+  async all(){ return Object.values(this.rows); },
+  async put(rec){ this.rows[rec.key]=rec; },
+  async remove(lang,id){ delete this.rows[lang+'/'+id]; },
+  async clear(lang){ for(const k of Object.keys(this.rows)) if(k.startsWith(lang+'/')) delete this.rows[k]; }
+});
+
+let Store = null, MODE = 'local';
+async function initStore(){
+  if(location.protocol.startsWith('http')){
+    try{
+      const r = await fetch('/api/health', {cache:'no-store'});
+      if(r.ok && (r.headers.get('content-type')||'').includes('json')){
+        const h = await r.json();
+        if(h.ok){ Store = Shared; MODE = 'shared'; return; }
+      }
+    }catch(e){}
+  }
+  if(await Local.open()){ Store = Local; MODE = 'local'; }
+  else { Store = Mem; MODE = 'memory'; }
+}
+function showMode(){
+  const b = $('modeBadge'), m = $('modeMsg');
+  if(MODE==='shared'){
+    b.className='mode shared'; b.textContent='● Shared: everyone with this link sees the same data';
+    m.classList.add('hidden');
+    $('libNote').innerHTML = 'Saved on the shared server. Everyone who opens this link sees the same courses and reports. Each course keeps a copy of its original report file; if a course is uploaded again, the earlier file is kept under “Previous versions”.';
+    $('foot').textContent = 'Data is stored on this site\'s shared storage (Netlify Blobs).';
+  }else{
+    b.className='mode local'; b.textContent = MODE==='memory' ? '● Temporary: nothing is saved' : '● Local: saved in this browser only';
+    m.className='msg bad';
+    m.innerHTML = MODE==='memory'
+      ? 'This browser is blocking storage, so courses will be lost when you close the page. Use “Export backup” before closing.'
+      : 'Running in <b>local mode</b>: courses are saved only in this browser on this computer, and other people will not see them. To share with your team, deploy the full project folder to Netlify (see the README). Your local data can be moved there with Export backup → Import backup.';
+    $('libNote').innerHTML = 'Saved in this browser only. Each course keeps a copy of its original report file; if a course is uploaded again, the earlier file is kept under “Previous versions”.';
+    $('foot').textContent = 'All processing happens in your browser.';
+  }
+}
+
+/* =====================================================================
+   Category switch
+   ===================================================================== */
+function applyLang(){
+  $('langSeg').innerHTML = LANGS.map(l=>`<button data-lang="${esc(l.code)}" class="${l.code===LANG?'active':''}" style="${l.code===LANG?'background:'+LANG_COLOR[l.code]:''}">${esc(l.name)}</button>`).join('');
+  document.querySelectorAll('[data-langbadge]').forEach(e=>{ e.className='lang-badge'; e.style.background=LANG_COLOR[LANG]; e.textContent=LANG_NAME[LANG]; });
+  document.querySelectorAll('[data-langname]').forEach(e=>e.textContent=LANG_NAME[LANG]);
+  const others = LANGS.filter(l=>l.code!==LANG);
+  const was = new Set(crossChecked());
+  $('crossWrap').innerHTML = others.length ? `<span>Also compare with:</span> ` + others.map(l=>`<label style="display:inline-flex;align-items:center;gap:5px;margin:0 10px 0 4px;text-transform:none;font-size:13px;color:var(--ink);font-weight:400;letter-spacing:0"><input type="checkbox" class="crossLang" value="${esc(l.code)}" ${was.has(l.code)?'checked':''}> ${esc(l.name)}</label>`).join('') : '';
+  $('catHint').textContent = `Uploads, checks and the library below are for ${LANG_NAME[LANG]} courses.`;
+  $('btnAllReport').textContent = `Full overlap report (${LANG_NAME[LANG]})`;
+  $('btnClear').textContent = `Clear all ${LANG_NAME[LANG]} courses`;
+}
+function crossChecked(){ return [...document.querySelectorAll('.crossLang:checked')].map(i=>i.value); }
+$('langSeg').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b || b.dataset.lang===LANG) return;
+  LANG=b.dataset.lang; lsSet('cpcLang',LANG); applyLang();
+  $('results').classList.add('hidden');
+  renderLibrary();
+});
+async function reloadLangs(){
+  try{ setLangs(await Store.languages()); }catch(e){}
+  applyLang();
+}
+$('btnAddLang').onclick = async ()=>{
+  const name = prompt('Name of the new language (for example: Marathi, Gujarati, Tamil):');
+  if(!name || !name.trim()) return;
+  try{
+    busy(true,'Adding language…');
+    const r = await Store.addLanguage(name.trim());
+    setLangs(r.languages); busy(false);
+    LANG = r.language.code; lsSet('cpcLang',LANG); applyLang();
+    $('results').classList.add('hidden'); renderLibrary();
+    if(r.existed) alert(`"${r.language.name}" already exists, so it has been opened.`);
+  }catch(e){ busy(false); alert(e.message); }
+};
+$('btnRemoveLang').onclick = async ()=>{
+  if(!confirm(`Remove the "${LANG_NAME[LANG]}" language from the list?${MODE==='shared'?' It will disappear for everyone.':''}`)) return;
+  try{
+    busy(true,'Removing…');
+    const r = await Store.removeLanguage(LANG);
+    busy(false); setLangs(r.languages); LANG = LANGS[0].code; lsSet('cpcLang',LANG); applyLang();
+    $('results').classList.add('hidden'); renderLibrary();
+  }catch(e){ busy(false); alert(e.message); }
+};
+
+/* =====================================================================
+   File parsing
+   ===================================================================== */
+let sheetData = {}, currentFile = '', currentBuf = null, currentType = '';
+function parseCSV(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c=='"'){ if(text[i+1]=='"'){cell+='"';i++;} else q=false; } else cell+=c; }
+    else if(c=='"') q=true;
+    else if(c==','){ row.push(cell); cell=''; }
+    else if(c=='\n'||c=='\r'){ if(c=='\r'&&text[i+1]=='\n') i++; row.push(cell); rows.push(row); row=[]; cell=''; }
+    else cell+=c;
+  }
+  if(cell!==''||row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+function handleFile(f){
+  if(!f) return;
+  currentFile = f.name; currentType = f.type || '';
+  const reader = new FileReader();
+  const isCSV = /\.csv$/i.test(f.name);
+  reader.onload = e => {
+    try{
+      currentBuf = e.target.result.slice(0);
+      sheetData = {};
+      if(isCSV){
+        sheetData['Sheet1'] = parseCSV(new TextDecoder('utf-8').decode(e.target.result).replace(/^﻿/,''));
+      }else{
+        if(typeof XLSX === 'undefined'){ alert('The Excel reader could not load. Please check your internet connection and reload the page (or save the report as CSV).'); return; }
+        const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
+        wb.SheetNames.forEach(n => sheetData[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], {header:1, defval:'', raw:false}));
+      }
+      setupForm();
+    }catch(err){ alert('Could not read this file: '+err.message); }
+  };
+  reader.readAsArrayBuffer(f);
+}
+let headerRowIdx = 0, headers = [];
+function setupForm(){
+  $('setup').classList.remove('hidden');
+  $('results').classList.add('hidden');
+  $('courseName').value = currentFile.replace(/\.(xlsx|xls|xlsm|csv)$/i,'').replace(/[_]+/g,' ').trim();
+  $('uploader').value = lsGet('cpcUploader');
+  const names = Object.keys(sheetData);
+  let best = names[0];
+  for(const n of names){ if(findHeaderRow(sheetData[n]).score>0){ best=n; break; } }
+  $('sheetSel').innerHTML = names.map(n=>`<option ${n===best?'selected':''}>${esc(n)}</option>`).join('');
+  onSheetChange();
+}
+function findHeaderRow(rows){
+  const lim = Math.min(rows.length,25);
+  for(let i=0;i<lim;i++){
+    const r = rows[i]||[];
+    const filled = r.filter(c=>String(c).trim()!=='').length;
+    if(filled>=2 && r.some(c=>/path|url|link|location/i.test(String(c)) && String(c).length<60)) return {idx:i, score:2};
+  }
+  for(let i=0;i<lim;i++){
+    if((rows[i]||[]).filter(c=>String(c).trim()!=='').length>=2) return {idx:i, score:0};
+  }
+  return {idx:0, score:0};
+}
+function onSheetChange(){
+  const rows = sheetData[$('sheetSel').value] || [];
+  headerRowIdx = findHeaderRow(rows).idx;
+  const raw = rows[headerRowIdx] || [];
+  const width = Math.max(...rows.slice(0,200).map(r=>r.length), raw.length, 1);
+  headers = Array.from({length:width}, (_,i)=> String(raw[i]??'').trim() || `Column ${i+1}`);
+  let pIdx = headers.findIndex(h=>/content\s*path/i.test(h));
+  if(pIdx<0) pIdx = headers.findIndex(h=>/path/i.test(h));
+  if(pIdx<0) pIdx = headers.findIndex(h=>/url|link|location/i.test(h));
+  if(pIdx<0){
+    let bestC=0,bestN=-1;
+    headers.forEach((_,c)=>{ const n=rows.slice(headerRowIdx+1).filter(r=>/[\/\\]/.test(String(r[c]??''))).length; if(n>bestN){bestN=n;bestC=c;} });
+    pIdx=bestC;
+  }
+  const tIdx = headers.findIndex((h,i)=>i!==pIdx && /title|video|name|topic|lesson|content\s*name/i.test(h) && !/path/i.test(h));
+  $('pathCol').innerHTML = headers.map((h,i)=>`<option value="${i}" ${i===pIdx?'selected':''}>${esc(h)}</option>`).join('');
+  $('titleCol').innerHTML = `<option value="-1">— none —</option>` + headers.map((h,i)=>`<option value="${i}" ${i===tIdx?'selected':''}>${esc(h)}</option>`).join('');
+  updatePreview();
+}
+function extractEntries(){
+  const rows = sheetData[$('sheetSel').value] || [];
+  const pc = +$('pathCol').value, tc = +$('titleCol').value;
+  const out = [];
+  for(let i=headerRowIdx+1;i<rows.length;i++){
+    const r = rows[i]||[];
+    const p = String(r[pc]??'').trim();
+    if(!p) continue;
+    out.push({row:i+1, path:p, title: tc>=0 ? String(r[tc]??'').trim() : ''});
+  }
+  return out;
+}
+function updatePreview(){
+  const e = extractEntries();
+  const sample = e.slice(0,3).map(x=>`<code>${esc(x.path)}</code>`).join('<br>');
+  $('preview').innerHTML = `Header found on row ${headerRowIdx+1}. <b>${e.length}</b> content paths detected.` + (sample?`<br>Examples:<br>${sample}`:'');
+}
+
+/* =====================================================================
+   Matching
+   ===================================================================== */
+let lastReport = null;
+const label = c => c.lang===LANG ? c.name : `${c.name} [${LANG_SHORT[c.lang]}]`;
+
+async function compareSet(excludeId){
+  const mine = (await Store.list(LANG)).map(c=>Object.assign(c,{lang:LANG}));
+  let others = mine.filter(c=>c.id!==excludeId);
+  for(const o of crossChecked()){
+    if(!LANG_NAME[o] || o===LANG) continue;
+    others = others.concat((await Store.list(o)).map(c=>Object.assign(c,{lang:o})));
+  }
+  return {mine, others};
+}
+
+async function runCheck(save){
+  const name = $('courseName').value.trim();
+  if(!name){ alert('Please enter a course name.'); return; }
+  const entries = extractEntries();
+  if(!entries.length){ alert('No content paths found in the selected column.'); return; }
+  const loose = $('normalize').checked;
+  const uploader = $('uploader').value.trim(); lsSet('cpcUploader', uploader);
+  busy(true, 'Loading saved courses…');
+  try{
+    const id = slug(name);
+    const {mine, others} = await compareSet(id);
+    const existing = mine.find(c=>c.id===id);
+    if(existing && save){
+      busy(false);
+      if(!confirm(`A ${LANG_NAME[LANG]} course named "${existing.name}" is already saved${existing.uploadedBy?' (by '+existing.uploadedBy+')':''}. Replace it with this file? The earlier file will be kept under "Previous versions".`)) return;
+    }
+    const report = buildReport({name, file:currentFile, entries}, others, loose);
+    lastReport = report;
+    let msg='';
+    if(save){
+      busy(true, 'Saving…');
+      const rec = {name, file:currentFile, fileType:currentType, uploadedBy:uploader, entries,
+        pathColumn: headers[+$('pathCol').value], titleColumn: +$('titleCol').value>=0 ? headers[+$('titleCol').value] : ''};
+      await Store.save(LANG, rec, currentBuf);
+      const tooBig = MODE==='shared' && currentBuf && currentBuf.byteLength>MAX_ORIGINAL_BYTES;
+      msg = `<div class="msg ok">“${esc(name)}” ${existing?'updated in':'saved to'} the ${LANG_NAME[LANG]} library${tooBig?'':', with a copy of the original file'}${existing?' (the earlier version is kept under “Previous versions”)':''}.${MODE==='shared'?' Everyone using this link will now see it.':''}</div>`;
+      if(tooBig) msg += `<div class="msg bad">The original file is larger than 3.5 MB, so only its content paths were saved (not the file itself).</div>`;
+    }else{
+      msg = `<div class="msg info">Checked only. This course was <b>not</b> saved to the library.</div>`;
+    }
+    if(!others.length) msg += `<div class="msg info">There are no other saved ${LANG_NAME[LANG]} courses to compare against yet. Upload the next course to see matches.</div>`;
+    busy(false);
+    showReport(report, msg);
+    if(save) renderLibrary();
+  }catch(e){ busy(false); alert('Something went wrong: '+e.message); }
+}
+
+function buildReport(course, others, loose){
+  const idx = new Map();
+  for(const c of others){
+    for(const e of c.entries){
+      const k = norm(e.path, loose);
+      if(!idx.has(k)) idx.set(k, []);
+      idx.get(k).push({course:label(c), lang:c.lang, row:e.row, path:e.path, title:e.title});
+    }
+  }
+  const matched=[], unique=[], seen=new Map();
+  for(const e of course.entries){
+    const k = norm(e.path, loose);
+    if(!seen.has(k)) seen.set(k, []);
+    seen.get(k).push(e);
+    const hits = idx.get(k);
+    if(hits) matched.push(Object.assign({}, e, {hits}));
+    else unique.push(e);
+  }
+  const dups = [...seen.values()].filter(a=>a.length>1);
+  const byCourse = {};
+  for(const m of matched) for(const h of m.hits){ (byCourse[h.course] ||= new Set()).add(norm(m.path,loose)); }
+  return {course:course.name, lang:LANG, file:course.file, total:course.entries.length, matched, unique, dups,
+          byCourse:Object.entries(byCourse).map(([c,s])=>({course:c, count:s.size})).sort((a,b)=>b.count-a.count),
+          comparedWith: others.map(o=>label(o)), loose, generated:new Date()};
+}
+
+/* =====================================================================
+   Report rendering
+   ===================================================================== */
+let activeTab = 'matched';
+function showReport(r, msg){
+  $('results').classList.remove('hidden');
+  $('tabs').classList.toggle('hidden', !!r.allMode);
+  $('resTitle').textContent = r.course;
+  $('resLang').className = 'lang-badge'; $('resLang').style.background = LANG_COLOR[r.lang]||'#667085'; $('resLang').textContent = LANG_NAME[r.lang]||r.lang;
+  $('resMsg').innerHTML = msg || '';
+  if(r.allMode){
+    $('stats').innerHTML = `
+      <div class="stat info"><div class="n">${r.totalCourses}</div><div class="t">Saved ${LANG_NAME[r.lang]} courses</div></div>
+      <div class="stat info"><div class="n">${r.totalPaths}</div><div class="t">Distinct content paths</div></div>
+      <div class="stat ${r.shared.length?'warn':'ok'}"><div class="n">${r.shared.length}</div><div class="t">Paths used in 2+ courses</div></div>`;
+  }else{
+    const uniqMatched = new Set(r.matched.map(m=>norm(m.path,r.loose))).size;
+    $('stats').innerHTML = `
+      <div class="stat info"><div class="n">${r.total}</div><div class="t">Content paths in this course</div></div>
+      <div class="stat ${r.matched.length?'warn':'ok'}"><div class="n">${r.matched.length}</div><div class="t">Already in other courses (${uniqMatched} distinct)</div></div>
+      <div class="stat ok"><div class="n">${r.unique.length}</div><div class="t">New / unique to this course</div></div>
+      <div class="stat ${r.byCourse.length?'warn':'info'}"><div class="n">${r.byCourse.length}<span style="font-size:14px;font-weight:400"> / ${r.comparedWith.length}</span></div><div class="t">Saved courses that share paths</div></div>
+      ${r.dups.length?`<div class="stat bad"><div class="n">${r.dups.length}</div><div class="t">Paths repeated inside this file</div></div>`:''}`;
+  }
+  $('resSearch').value='';
+  setTab('matched');
+  $('results').scrollIntoView({behavior:'smooth'});
+}
+function setTab(t){
+  activeTab=t;
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===t));
+  renderTable();
+}
+const chipCls = h => h.lang && h.lang!==lastReport.lang ? 'chip x' : 'chip';
+function renderTable(){
+  const r = lastReport; if(!r) return;
+  const q = $('resSearch').value.trim().toLowerCase();
+  const f = s => !q || String(s).toLowerCase().includes(q);
+  let html='';
+  if(r.allMode){ $('resTable').innerHTML = renderAllTable(r,f); return; }
+  if(activeTab==='matched'){
+    const rows = r.matched.filter(m=> f(m.path)||f(m.title)||m.hits.some(h=>f(h.course)||f(h.title)));
+    html = rows.length ? `<table><thead><tr><th>#</th><th>Row</th><th>Content path</th><th>Title</th><th>Also found in</th></tr></thead><tbody>`+
+      rows.map((m,i)=>`<tr><td>${i+1}</td><td>${m.row}</td><td class="path">${esc(m.path)}</td><td>${esc(m.title)}</td><td>${
+        m.hits.map(h=>`<span class="${chipCls(h)}" title="Row ${h.row}${h.title?' · '+esc(h.title):''}">${esc(h.course)} · row ${h.row}</span>`).join('')}</td></tr>`).join('')+`</tbody></table>`
+      : `<p class="muted" style="padding:14px">No matching content paths${q?' for this search':''}.</p>`;
+  }else if(activeTab==='bycourse'){
+    const groups = r.byCourse.filter(b=>f(b.course)).map(b=>{
+      const items = r.matched.filter(m=>m.hits.some(h=>h.course===b.course));
+      return `<tr><td><b>${esc(b.course)}</b></td><td>${b.count}</td><td>${items.map(m=>`<div style="font-family:Consolas,monospace;font-size:12px;word-break:break-all">${esc(m.path)}${m.title?` <span class="muted">(${esc(m.title)})</span>`:''}</div>`).join('')}</td></tr>`;
+    }).join('');
+    html = groups ? `<table><thead><tr><th style="width:220px">Saved course</th><th style="width:90px">Shared paths</th><th>Paths</th></tr></thead><tbody>${groups}</tbody></table>` : `<p class="muted" style="padding:14px">No overlaps with any saved course.</p>`;
+  }else if(activeTab==='unique'){
+    const rows = r.unique.filter(u=>f(u.path)||f(u.title));
+    html = rows.length ? `<table><thead><tr><th>#</th><th>Row</th><th>Content path</th><th>Title</th></tr></thead><tbody>`+
+      rows.map((u,i)=>`<tr><td>${i+1}</td><td>${u.row}</td><td class="path">${esc(u.path)}</td><td>${esc(u.title)}</td></tr>`).join('')+`</tbody></table>`
+      : `<p class="muted" style="padding:14px">No unique paths.</p>`;
+  }else{
+    const rows = r.dups.filter(d=>d.some(x=>f(x.path)||f(x.title)));
+    html = rows.length ? `<table><thead><tr><th>Content path</th><th>Times</th><th>Rows</th></tr></thead><tbody>`+
+      rows.map(d=>`<tr><td class="path">${esc(d[0].path)}</td><td>${d.length}</td><td>${d.map(x=>x.row).join(', ')}</td></tr>`).join('')+`</tbody></table>`
+      : `<p class="muted" style="padding:14px">No path is repeated inside this file.</p>`;
+  }
+  $('resTable').innerHTML = html;
+}
+
+async function allCoursesReport(){
+  busy(true,'Loading saved courses…');
+  let all;
+  try{ all = await Store.list(LANG); }catch(e){ busy(false); alert(e.message); return; }
+  busy(false);
+  if(all.length<2){ alert(`Save at least two ${LANG_NAME[LANG]} courses to see a full overlap report.`); return; }
+  const loose = $('normalize').checked;
+  const idx = new Map();
+  for(const c of all) for(const e of c.entries){
+    const k = norm(e.path, loose);
+    if(!idx.has(k)) idx.set(k, {path:e.path, title:e.title, occ:[]});
+    const o = idx.get(k); if(!o.title && e.title) o.title = e.title;
+    if(!o.occ.some(x=>x.course===c.name && x.row===e.row)) o.occ.push({course:c.name, row:e.row});
+  }
+  const shared = [...idx.values()].map(o=>Object.assign({}, o, {courses:[...new Set(o.occ.map(x=>x.course))]})).filter(o=>o.courses.length>1)
+    .sort((a,b)=>b.courses.length-a.courses.length || a.path.localeCompare(b.path));
+  const names = all.map(c=>c.name).sort();
+  const pair = {};
+  for(const s of shared) for(const a of s.courses) for(const b of s.courses) if(a!==b){ pair[a+'||'+b]=(pair[a+'||'+b]||0)+1; }
+  lastReport = {allMode:true, lang:LANG, course:`All ${LANG_NAME[LANG]} courses`, shared, names, pair, totalCourses:all.length, totalPaths:idx.size, loose, generated:new Date()};
+  showReport(lastReport, `<div class="msg info">Every saved ${LANG_NAME[LANG]} course compared with every other ${LANG_NAME[LANG]} course.</div>`);
+}
+function renderAllTable(r,f){
+  const rows = r.shared.filter(s=>f(s.path)||f(s.title)||s.courses.some(f));
+  const list = rows.length ? `<table><thead><tr><th>#</th><th>Content path</th><th>Title</th><th>Courses</th><th>Used in</th></tr></thead><tbody>`+
+    rows.map((s,i)=>`<tr><td>${i+1}</td><td class="path">${esc(s.path)}</td><td>${esc(s.title)}</td><td>${s.courses.length}</td><td>${s.occ.map(o=>`<span class="chip">${esc(o.course)} · row ${o.row}</span>`).join('')}</td></tr>`).join('')+`</tbody></table>`
+    : `<p class="muted" style="padding:14px">No content path is shared between saved courses.</p>`;
+  const mx = `<h3 style="font-size:14px;margin:16px 10px 8px">Shared paths between each pair of courses</h3><table><thead><tr><th></th>${r.names.map(n=>`<th>${esc(n)}</th>`).join('')}</tr></thead><tbody>`+
+    r.names.map(a=>`<tr><th>${esc(a)}</th>${r.names.map(b=>`<td style="text-align:center">${a===b?'—':(r.pair[a+'||'+b]||'')}</td>`).join('')}</tr>`).join('')+`</tbody></table>`;
+  return list + mx;
+}
+
+/* =====================================================================
+   Report downloads
+   ===================================================================== */
+function reportSheets(r){
+  if(r.allMode){
+    const summary = [[`Full overlap report – all ${LANG_NAME[r.lang]} courses`],['Category',LANG_NAME[r.lang]],['Generated',r.generated.toLocaleString()],['Saved courses',r.totalCourses],['Distinct content paths',r.totalPaths],['Paths used in 2+ courses',r.shared.length],['Matching mode',r.loose?'Ignore case/spaces/slashes':'Exact']];
+    const shared = [['#','Content Path','Title','No. of Courses','Courses','Course & Row details']].concat(
+      r.shared.map((s,i)=>[i+1,s.path,s.title,s.courses.length,s.courses.join(', '),s.occ.map(o=>`${o.course} (row ${o.row})`).join('; ')]));
+    const matrix = [[''].concat(r.names)].concat(r.names.map(a=>[a].concat(r.names.map(b=>a===b?'-':(r.pair[a+'||'+b]||0)))));
+    return {'Summary':summary,'Shared Paths':shared,'Course Pair Matrix':matrix};
+  }
+  const summary = [['Content path match report'],['Category',LANG_NAME[r.lang]],['Course',r.course],['File',r.file],['Generated',r.generated.toLocaleString()],
+    ['Matching mode',r.loose?'Ignore case/spaces/slashes':'Exact'],[],
+    ['Total content paths',r.total],['Already in other courses',r.matched.length],['New / unique',r.unique.length],['Repeated within this file',r.dups.length],
+    ['Compared with',r.comparedWith.length+' saved course(s)'],[],['Saved course','Shared paths']].concat(r.byCourse.map(b=>[b.course,b.count]));
+  const matches = [['#','Row in this course','Content Path','Title (this course)','Matched Course','Row in matched course','Title (matched course)','Path as in matched course']];
+  let n=0; r.matched.forEach(m=>m.hits.forEach(h=>matches.push([++n,m.row,m.path,m.title,h.course,h.row,h.title,h.path])));
+  const unique = [['#','Row','Content Path','Title']].concat(r.unique.map((u,i)=>[i+1,u.row,u.path,u.title]));
+  const sheets = {'Summary':summary,'Matched Paths':matches,'Unique Paths':unique};
+  if(r.dups.length) sheets['Repeated In File'] = [['Content Path','Times','Rows']].concat(r.dups.map(d=>[d[0].path,d.length,d.map(x=>x.row).join(', ')]));
+  return sheets;
+}
+function dlXlsx(){
+  const r=lastReport; if(!r) return;
+  if(typeof XLSX==='undefined'){ alert('Excel export needs the Excel library, which could not load (no internet?). Use the CSV download instead.'); return; }
+  const book = XLSX.utils.book_new();
+  for(const [name,aoa] of Object.entries(reportSheets(r))){
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const w = aoa.reduce((acc,row)=>{ row.forEach((v,i)=>acc[i]=Math.min(70,Math.max(acc[i]||8,String(v??'').length+2))); return acc; },[]);
+    ws['!cols'] = w.map(x=>({wch:x}));
+    XLSX.utils.book_append_sheet(book, ws, name);
+  }
+  XLSX.writeFile(book, `Match_Report_${LANG_SHORT[r.lang]}_${safe(r.course)}_${stamp()}.xlsx`);
+}
+function dlCsv(){
+  const r=lastReport; if(!r) return;
+  const sheets = reportSheets(r);
+  const aoa = r.allMode ? sheets['Shared Paths'] : sheets['Matched Paths'];
+  const csv = aoa.map(row=>row.map(v=>{ const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(',')).join('\r\n');
+  download(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}), `Match_Report_${LANG_SHORT[r.lang]}_${safe(r.course)}_${stamp()}.csv`);
+}
+
+/* =====================================================================
+   Library
+   ===================================================================== */
+let libCache = [];
+async function renderLibrary(){
+  let all;
+  try{ all = (await Store.list(LANG)).sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt))); }
+  catch(e){ $('libTable').innerHTML = `<p class="msg bad" style="margin:10px">Could not load saved courses: ${esc(e.message)}</p>`; return; }
+  libCache = all;
+  $('libCount').textContent = all.length;
+  const rm = $('btnRemoveLang');
+  rm.textContent = `Remove ${LANG_NAME[LANG]}`;
+  rm.classList.toggle('hidden', all.length>0 || LANGS.length<=1);
+  renderBackupStatus();
+  const fileBtn = (c, act, i, f, txt) => Store.hasFile(f)
+    ? `<button class="small secondary" style="margin:2px 0" data-act="${act}" data-id="${esc(c.id)}" ${i!=null?`data-i="${i}"`:''} title="Download the original file">⬇ ${esc(txt)}</button>`
+    : `<span class="muted" style="font-size:12px">${esc(txt)}</span>`;
+  $('libTable').innerHTML = all.length ? `<table><thead><tr><th>Course</th><th>Original report</th><th>Paths</th><th>Saved on</th><th>Uploaded by</th><th>Previous versions</th><th></th></tr></thead><tbody>`+
+    all.map(c=>`<tr><td><b>${esc(c.name)}</b></td>
+      <td>${fileBtn(c,'orig',null,c,c.file)}</td>
+      <td>${c.entries.length}</td><td>${new Date(c.uploadedAt).toLocaleString()}</td><td>${esc(c.uploadedBy||'')}</td>
+      <td>${(c.history||[]).length?c.history.map((h,i)=>fileBtn(c,'hist',i,h,`${h.file} · ${new Date(h.uploadedAt).toLocaleDateString()}`)).join('<br>'):'<span class="muted">—</span>'}</td>
+      <td style="white-space:nowrap"><button class="small secondary" data-act="check" data-id="${esc(c.id)}">Check vs others</button>
+      <button class="small danger" data-act="del" data-id="${esc(c.id)}">Delete</button></td></tr>`).join('')+`</tbody></table>`
+    : `<p class="muted" style="padding:14px">No ${LANG_NAME[LANG]} courses saved yet. Upload the first content path report above.</p>`;
+}
+async function getBuf(f){ return Store.fileBuf(f); }
+$('libTable').addEventListener('click', async e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  const c = libCache.find(x=>x.id===b.dataset.id); if(!c) return;
+  try{
+    if(b.dataset.act==='orig' || b.dataset.act==='hist'){
+      const f = b.dataset.act==='orig' ? c : c.history[+b.dataset.i];
+      busy(true,'Downloading…');
+      const buf = await getBuf(f); busy(false);
+      download(new Blob([buf],{type:f.fileType||'application/octet-stream'}), f.file);
+      return;
+    }
+    if(b.dataset.act==='del'){
+      if(!confirm(`Delete the ${LANG_NAME[LANG]} course "${c.name}" and its stored report files?${MODE==='shared'?' This removes it for everyone.':''}`)) return;
+      busy(true,'Deleting…'); await Store.remove(LANG, c.id); busy(false); renderLibrary(); return;
+    }
+    busy(true,'Comparing…');
+    const {others} = await compareSet(c.id);
+    busy(false);
+    lastReport = buildReport({name:c.name, file:c.file, entries:c.entries}, others, $('normalize').checked);
+    showReport(lastReport, `<div class="msg info">Saved course “${esc(c.name)}” compared with all other saved ${LANG_NAME[LANG]} courses${crossChecked().length?' and '+crossChecked().map(x=>LANG_NAME[x]).join(', ')+' courses':''}.</div>`);
+  }catch(err){ busy(false); alert(err.message); }
+});
+
+/* ----- backup status ----- */
+async function renderBackupStatus(){
+  const el=$('backupStatus');
+  let st={};
+  try{ st = await Store.state(); }catch(e){}
+  if(!st.lastChange && !st.lastBackup){ el.className='msg info'; el.innerHTML='No backup taken yet. Use <b>Export backup</b> to download every course (all languages) with its original report files.'; return; }
+  if(!st.lastBackup){ el.className='msg bad'; el.innerHTML='No backup taken yet. Click <b>Export backup</b> to save all courses and original reports (all languages) to one file.'; return; }
+  const when=new Date(st.lastBackup).toLocaleString();
+  if(st.lastChange && st.lastChange>st.lastBackup){ el.className='msg bad'; el.innerHTML=`Last backup: ${when}. Courses have changed since then. Click <b>Export backup</b> to take a fresh one.`; }
+  else { el.className='msg ok'; el.innerHTML=`Backup is up to date (last taken ${when}).`; }
+}
+
+/* ----- export / import ----- */
+async function exportBackup(){
+  busy(true,'Preparing backup…');
+  try{
+    const out=[];
+    for(const lang of LANGS.map(l=>l.code)){
+      for(const c of await Store.list(lang)){
+        const fileB64 = Store.hasFile(c) ? bufToB64(await getBuf(c)) : null;
+        const history = [];
+        for(const h of c.history||[]) history.push({file:h.file, fileType:h.fileType||'', uploadedAt:h.uploadedAt, uploadedBy:h.uploadedBy||'', pathCount:h.pathCount||0, fileB64: Store.hasFile(h) ? bufToB64(await getBuf(h)) : null});
+        out.push({lang, name:c.name, file:c.file, fileType:c.fileType||'', uploadedAt:c.uploadedAt, uploadedBy:c.uploadedBy||'', pathColumn:c.pathColumn||'', titleColumn:c.titleColumn||'', entries:c.entries, fileB64, history});
+      }
+    }
+    if(!out.length){ busy(false); alert('There are no saved courses to back up.'); return; }
+    download(new Blob([JSON.stringify({app:'content-path-checker',version:4,exported:new Date().toISOString(),languages:LANGS,courses:out})],{type:'application/json'}), `content_path_library_backup_${stamp()}.json`);
+    await Store.markBackup();
+    busy(false); renderBackupStatus();
+  }catch(e){ busy(false); alert('Backup failed: '+e.message); }
+}
+async function importBackup(file){
+  let data;
+  try{ data = JSON.parse(await file.text()); }catch(e){ alert('This is not a valid backup file.'); return; }
+  const list = (data.courses||[]).filter(c=>c && c.name && Array.isArray(c.entries));
+  if(!list.length){ alert('No courses found in this backup file.'); return; }
+  // older backups (from the single-file version) have no category: ask where they belong
+  const noLang = list.filter(c=>!c.lang);
+  let defLang = LANG;
+  if(noLang.length){
+    const opts = LANGS.map((l,i)=>`${i+1} = ${l.name}`).join('\n');
+    const ans = prompt(`${noLang.length} course(s) in this backup have no language (made with the earlier version).\nWhich language are they? Type the number:\n${opts}`, String(LANGS.findIndex(l=>l.code===LANG)+1));
+    if(ans===null) return;
+    const pick = LANGS[parseInt(ans,10)-1];
+    if(!pick){ alert('Not a valid choice. Import cancelled.'); return; }
+    defLang = pick.code;
+  }
+  // make sure every language used in the backup exists here (add missing ones)
+  const backupNames = {}; (data.languages||[]).forEach(l=>{ if(l && l.code) backupNames[l.code]=l.name; });
+  const codeMap = {};
+  try{
+    for(const code of [...new Set(list.map(c=>c.lang).filter(Boolean))]){
+      if(LANG_NAME[code]){ codeMap[code]=code; continue; }
+      const r = await Store.addLanguage(backupNames[code] || code, code);
+      setLangs(r.languages); codeMap[code]=r.language.code;
+    }
+  }catch(e){ alert('Could not add a language from the backup: '+e.message); return; }
+  applyLang();
+  const norm1 = c => ({lang:c.lang ? codeMap[c.lang] : defLang, name:c.name, file:c.file, fileType:c.fileType||'', uploadedAt:c.uploadedAt, uploadedBy:c.uploadedBy||'',
+    pathColumn:c.pathColumn||'', titleColumn:c.titleColumn||'', entries:c.entries,
+    fileB64: c.fileB64 ?? (typeof c.fileData==='string' ? c.fileData : null),
+    history:(c.history||[]).map(h=>({file:h.file, fileType:h.fileType||'', uploadedAt:h.uploadedAt, uploadedBy:h.uploadedBy||'', pathCount:h.pathCount||0, fileB64: h.fileB64 ?? (typeof h.fileData==='string'?h.fileData:null)}))});
+  const items = list.map(norm1);
+  busy(true,'Checking…');
+  let clash=0;
+  try{
+    for(const lang of LANGS.map(l=>l.code)){
+      const ids = new Set((await Store.list(lang)).map(c=>c.id));
+      clash += items.filter(c=>c.lang===lang && ids.has(slug(c.name))).length;
+    }
+  }catch(e){}
+  busy(false);
+  if(clash && !confirm(`${clash} course(s) in the backup already exist. Overwrite them with the backup copy?`)) return;
+  try{
+    let n=0;
+    for(const c of items){ busy(true,`Importing ${++n} of ${items.length}…`); await Store.importCourse(c.lang, c); }
+    busy(false); renderLibrary();
+    const counts = LANGS.map(l=>[l.name, items.filter(c=>c.lang===l.code).length]).filter(x=>x[1]).map(x=>`${x[1]} ${x[0]}`).join(', ');
+    alert(`Imported ${items.length} course(s): ${counts}.`);
+  }catch(e){ busy(false); alert('Import stopped: '+e.message); renderLibrary(); }
+}
+
+/* =====================================================================
+   Wire up
+   ===================================================================== */
+const drop = $('drop');
+drop.onclick = ()=>$('file').click();
+$('file').onchange = e=>{ handleFile(e.target.files[0]); e.target.value=''; };
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop', e=>handleFile(e.dataTransfer.files[0]));
+$('sheetSel').onchange = onSheetChange;
+$('pathCol').onchange = updatePreview;
+$('titleCol').onchange = updatePreview;
+$('btnCheckSave').onclick = ()=>runCheck(true);
+$('btnCheckOnly').onclick = ()=>runCheck(false);
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+$('resSearch').oninput = renderTable;
+$('btnDlXlsx').onclick = dlXlsx;
+$('btnDlCsv').onclick = dlCsv;
+$('btnAllReport').onclick = allCoursesReport;
+$('btnExport').onclick = exportBackup;
+$('btnImport').onclick = ()=>$('importFile').click();
+$('importFile').onchange = e=>{ const f=e.target.files[0]; e.target.value=''; if(f) importBackup(f); };
+$('btnClear').onclick = async ()=>{
+  if(!confirm(`Delete ALL ${LANG_NAME[LANG]} courses and their stored report files?${MODE==='shared'?' This removes them for everyone.':''} (Export a backup first if you might need them.)`)) return;
+  try{ busy(true,'Deleting…'); await Store.clear(LANG); }catch(e){ alert(e.message); }
+  busy(false); renderLibrary();
+};
+$('btnRefresh').onclick = async ()=>{ await reloadLangs(); renderLibrary(); };
+window.addEventListener('focus', async ()=>{ if(MODE==='shared'){ await reloadLangs(); renderLibrary(); } });
+setInterval(async ()=>{ if(MODE==='shared' && !document.hidden){ await reloadLangs(); renderLibrary(); } }, 60000);
+
+(async()=>{
+  applyLang();
+  await initStore();
+  await reloadLangs();
+  showMode();
+  renderLibrary();
+})();
+</script>
+</body>
+</html>
