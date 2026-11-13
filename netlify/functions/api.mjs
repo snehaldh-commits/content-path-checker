@@ -1,0 +1,159 @@
+// Shared storage API for the Content Path Overlap Checker.
+// Data lives in a Netlify Blobs store, so everyone who opens the site sees the same courses.
+//
+// Keys:
+//   courses/<lang>/<id>          JSON: course record (paths, file info, previous versions)
+//   files/<lang>/<id>/<stamp>    binary: original uploaded report file
+//   state                        JSON: { lastChange, lastBackup }
+import { getStore } from "@netlify/blobs";
+
+export const config = { path: "/api/*" };
+
+const LANGS = ["en", "hi"];
+const store = () => getStore({ name: "content-path-checker", consistency: "strong" });
+
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+const err = (msg, status = 400) => json({ error: msg }, status);
+
+function passcode() {
+  try { return (globalThis.Netlify?.env?.get("TEAM_PASSCODE")) || process.env.TEAM_PASSCODE || ""; }
+  catch { return process.env.TEAM_PASSCODE || ""; }
+}
+const cleanId = s => String(s || "").trim().toLowerCase().slice(0, 200);
+const b64ToBytes = b64 => Uint8Array.from(Buffer.from(b64, "base64"));
+
+async function touch(s, extra = {}) {
+  const st = (await s.get("state", { type: "json" })) || {};
+  await s.setJSON("state", { ...st, lastChange: new Date().toISOString(), ...extra });
+}
+
+async function listCourses(s, lang) {
+  const { blobs } = await s.list({ prefix: `courses/${lang}/` });
+  const all = await Promise.all(blobs.map(b => s.get(b.key, { type: "json" })));
+  return all.filter(Boolean);
+}
+
+async function saveCourse(s, lang, body, { keepHistory = true, importMode = false } = {}) {
+  const id = cleanId(body.name);
+  if (!id) throw new Error("Course name is required.");
+  if (!Array.isArray(body.entries)) throw new Error("Missing content paths.");
+  const key = `courses/${lang}/${id}`;
+  const existing = await s.get(key, { type: "json" });
+  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  let fileKey = null;
+  if (body.fileB64) {
+    fileKey = `files/${lang}/${id}/${stamp}`;
+    await s.set(fileKey, b64ToBytes(body.fileB64));
+  }
+
+  let history = [];
+  if (importMode) {
+    // history items arrive with their own base64 files
+    for (const h of body.history || []) {
+      let hk = null;
+      if (h.fileB64) {
+        hk = `files/${lang}/${id}/${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        await s.set(hk, b64ToBytes(h.fileB64));
+      }
+      history.push({ file: h.file, fileType: h.fileType || "", uploadedAt: h.uploadedAt, uploadedBy: h.uploadedBy || "", pathCount: h.pathCount || 0, fileKey: hk });
+    }
+    if (existing) for (const k of [existing.fileKey, ...(existing.history || []).map(h => h.fileKey)]) if (k) await s.delete(k);
+  } else if (existing && keepHistory) {
+    history = [...(existing.history || []), {
+      file: existing.file, fileType: existing.fileType || "", uploadedAt: existing.uploadedAt,
+      uploadedBy: existing.uploadedBy || "", pathCount: (existing.entries || []).length, fileKey: existing.fileKey || null
+    }];
+  }
+
+  const rec = {
+    id, lang, name: String(body.name).trim(), file: body.file || "", fileType: body.fileType || "",
+    uploadedAt: importMode && body.uploadedAt ? body.uploadedAt : new Date().toISOString(),
+    uploadedBy: String(body.uploadedBy || "").slice(0, 80),
+    pathColumn: body.pathColumn || "", titleColumn: body.titleColumn || "",
+    entries: body.entries.map(e => ({ row: e.row, path: String(e.path), title: String(e.title || "") })),
+    fileKey, history
+  };
+  await s.setJSON(key, rec);
+  await touch(s);
+  return { existed: !!existing, course: rec };
+}
+
+async function deleteCourse(s, lang, id) {
+  const key = `courses/${lang}/${id}`;
+  const c = await s.get(key, { type: "json" });
+  if (!c) return false;
+  for (const k of [c.fileKey, ...(c.history || []).map(h => h.fileKey)]) if (k) await s.delete(k);
+  await s.delete(key);
+  return true;
+}
+
+export default async (req) => {
+  const url = new URL(req.url);
+  const route = url.pathname.replace(/^\/api\/?/, "").replace(/\/$/, "");
+  const lang = url.searchParams.get("lang");
+  const s = store();
+  const isWrite = req.method !== "GET";
+
+  if (isWrite) {
+    const pc = passcode();
+    if (pc && req.headers.get("x-passcode") !== pc) return err("Passcode required", 401);
+  }
+
+  try {
+    if (route === "health") return json({ ok: true, passcode: !!passcode() });
+
+    if (route === "state" && req.method === "GET") return json((await s.get("state", { type: "json" })) || {});
+    if (route === "backup-done" && req.method === "POST") {
+      const now = new Date().toISOString();
+      const st = (await s.get("state", { type: "json" })) || {};
+      await s.setJSON("state", { ...st, lastBackup: now });
+      return json({ ok: true, lastBackup: now });
+    }
+
+    if (route === "courses") {
+      if (req.method === "GET") {
+        if (lang === "all") {
+          const out = {};
+          for (const l of LANGS) out[l] = await listCourses(s, l);
+          return json(out);
+        }
+        if (!LANGS.includes(lang)) return err("Unknown category");
+        return json(await listCourses(s, lang));
+      }
+      if (!LANGS.includes(lang)) return err("Unknown category");
+      if (req.method === "POST") {
+        const body = await req.json();
+        const r = await saveCourse(s, lang, body, { importMode: url.searchParams.get("import") === "1" });
+        return json(r);
+      }
+      if (req.method === "DELETE") {
+        const id = url.searchParams.get("id");
+        if (id) { await deleteCourse(s, lang, cleanId(id)); }
+        else { for (const c of await listCourses(s, lang)) await deleteCourse(s, lang, c.id); }
+        await touch(s);
+        return json({ ok: true });
+      }
+    }
+
+    if (route === "file" && req.method === "GET") {
+      const key = url.searchParams.get("key") || "";
+      if (!key.startsWith("files/")) return err("Bad key");
+      const data = await s.get(key, { type: "arrayBuffer" });
+      if (!data) return err("File not found", 404);
+      const name = url.searchParams.get("name") || "report";
+      return new Response(data, {
+        headers: {
+          "content-type": url.searchParams.get("type") || "application/octet-stream",
+          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+          "cache-control": "no-store"
+        }
+      });
+    }
+
+    return err("Not found", 404);
+  } catch (e) {
+    return err(e.message || "Server error", 500);
+  }
+};
